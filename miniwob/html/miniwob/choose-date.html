@@ -22,7 +22,7 @@ input { width: 100px; display: inline-block; }
 <script>
 var START_DATE = new Date(2016, 0, 1); // January 1, 2015
 var END_DATE = new Date(2016, 11, 31); // December 31, 2016
-core.EPISODE_MAX_TIME = 20000; // set episode interval to 20 seconds
+core.EPISODE_MAX_TIME = 180000; // set episode interval to 3.0 minutes
 
 var genProblem = function() {
   var d = ui_utils.randomDate(START_DATE, END_DATE);
