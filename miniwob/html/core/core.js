@@ -47,7 +47,7 @@ var WOB_REWARD_REASON = null; // reason for the reward
 var WOB_DONE_GLOBAL = false; // a done indicator
 var WOB_EPISODE_ID = 0; // number of episodes done so far
 var WOB_TASK_READY = true; // override this to show that the task is not ready yet
-core.EPISODE_MAX_TIME = 10000; // in ms. Set default time to 10s.
+core.EPISODE_MAX_TIME = 180000; // in ms. Set default time to 180s (3 minutes).
 
 // https://stackoverflow.com/questions/3169786/clear-text-selection-with-javascript
 // this piece of code clears the selection in a new episode, if a user happened
