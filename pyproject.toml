@@ -27,7 +27,7 @@ dependencies = [
     "Gymnasium>=1.0.0a1",
     "Pillow>=9.0.0",
     "selenium>=4.5.0",
-    "numpy>=1.18.0",
+    "numpy>=1.18.0,<2.2",
     "farama-notifications>=0.0.1",
     "modal>=0.65.66",
 ]
