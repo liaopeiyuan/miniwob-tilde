@@ -75,6 +75,9 @@ class ModalBrowserSession:
     current_url: Optional[str] = None
     task_width: Optional[int] = None
     task_height: Optional[int] = None
+    # Store creation parameters for recreation
+    subdomain: Optional[str] = None
+    headless: Optional[bool] = None
     SYNC_SCREEN_ID: str = "sync-task-cover"
     RESET_BLOCK_SLEEP_TIME: float = 0.05
     RESET_BLOCK_MAX_ATTEMPT: int = 20
@@ -133,31 +136,22 @@ class ModalBrowserSession:
             self.httpd.server_close()
             logging.info("HTTP server shut down successfully")
 
-    @modal.method()
-    def create_driver(
-        self, subdomain: str, headless: bool, task_width: int, task_height: int
-    ):
-        """Create and initialize the Chrome driver."""
+    def _create_driver_internal(self):
+        """Internal logic to create the Chrome driver, with retries."""
         from selenium import webdriver
         from selenium.common.exceptions import TimeoutException
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support import expected_conditions as EC
         from selenium.webdriver.support.wait import WebDriverWait
 
-        if self.driver is not None:
-            return True
-
         assert self.base_url is not None
-        if subdomain.startswith("flight."):
-            path = subdomain.replace(".", "/") + "/wrapper.html"
+        assert self.subdomain is not None
+        if self.subdomain.startswith("flight."):
+            path = self.subdomain.replace(".", "/") + "/wrapper.html"
             self.current_url = urllib.parse.urljoin(self.base_url, path)
         else:
-            # The HTML files are now inside a 'miniwob' subdirectory within the main html dir.
-            path = f"miniwob/{subdomain}.html"
+            path = f"miniwob/{self.subdomain}.html"
             self.current_url = urllib.parse.urljoin(self.base_url, path)
-
-        self.task_width = task_width
-        self.task_height = task_height
 
         options = webdriver.ChromeOptions()
         options.add_argument("--headless")
@@ -168,55 +162,70 @@ class ModalBrowserSession:
         options.add_argument("--disable-logging")
         options.add_argument("--silent")
 
-        if not headless:
+        if not self.headless:
             options.add_argument("--app=" + self.current_url)
 
-
-        for retry in range(3):
+        # Retry loop for robustness against transient startup errors.
+        for attempt in range(3):
             try:
                 driver = webdriver.Chrome(options=options)
-                print(f"Successfully created Chrome driver on attempt {retry + 1}")
-                break
+                driver.implicitly_wait(5)
+                driver.get(self.current_url)
+                logging.info(f"WebDriver getting URL: {self.current_url}")
+                WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.ID, self.SYNC_SCREEN_ID))
+                )
+                self.inner_width, self.inner_height = driver.execute_script(
+                    "return [window.innerWidth, window.innerHeight];"
+                )
+                self.driver = driver
+                logging.info(f"Successfully created Chrome driver on attempt {attempt + 1}")
+                return
             except Exception as e:
-                print(f"Failed to create Chrome driver on attempt {retry + 1}: {e}")
-                if retry == 2:
-                    raise
+                logging.warning(
+                    f"Failed to create Chrome driver on attempt {attempt + 1}/3: {e}"
+                )
+                if 'driver' in locals() and driver:
+                    driver.quit()
+                if attempt == 2:
+                    logging.error("All attempts to create driver failed.")
                 time.sleep(1)
-        driver.implicitly_wait(5)
 
-        driver.get(self.current_url)
-        logging.info(f"WebDriver getting URL: {self.current_url}")
+    @modal.method()
+    def create_driver(
+        self, subdomain: str, headless: bool, task_width: int, task_height: int
+    ):
+        """Create and initialize the Chrome driver."""
+        if self.driver is not None:
+            return True
+        # Store parameters for potential recreation
+        self.subdomain = subdomain
+        self.headless = headless
+        self.task_width = task_width
+        self.task_height = task_height
+        self._create_driver_internal()
+        return self.driver is not None
 
-        try:
-            WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.ID, self.SYNC_SCREEN_ID))
-            )
-        except TimeoutException as e:
-            logging.error("Page did not load properly. Wrong URL?")
-            raise e
-
-        self.inner_width, self.inner_height = driver.execute_script(
-            "return [window.innerWidth, window.innerHeight];"
-        )
-        self.driver = driver
-        
-        return True
+    def _ensure_driver(self):
+        """Checks if the driver exists and attempts to recreate it if not."""
+        if self.driver is None:
+            logging.warning("Driver not found. Attempting to recreate it.")
+            self._create_driver_internal()
+            if self.driver is None:
+                raise RuntimeError("Driver is not initialized and could not be recreated.")
 
     @modal.method()
     def execute_script(self, script: str):
         """Execute JavaScript on the page."""
-        if not self.driver:
-            raise RuntimeError("Driver not initialized")
+        self._ensure_driver()
+        assert self.driver is not None
         return self.driver.execute_script(script)
 
     @modal.method()
     def execute_action(self, action_data: str):
         """Execute a selenium action (action_data is base64 encoded pickle)."""
         from miniwob.selenium_actions import execute_action_on_chromedriver
-
-        if not self.driver:
-            raise RuntimeError("Driver not initialized")
-
+        self._ensure_driver()
         # Deserialize the action data
         action, fields, config = pickle.loads(base64.b64decode(action_data))
         execute_action_on_chromedriver(action, fields, config, self.driver)
@@ -226,10 +235,7 @@ class ModalBrowserSession:
     def get_screenshot_data(self):
         """Get screenshot as base64 encoded image data."""
         from miniwob.screenshot import get_screenshot, pil_to_numpy_array
-
-        if not self.driver:
-            raise RuntimeError("Driver not initialized")
-
+        self._ensure_driver()
         if self.inner_width is None or self.inner_height is None:
             raise RuntimeError("Driver dimensions not set")
 
@@ -250,8 +256,8 @@ class ModalBrowserSession:
     @modal.method()
     def refresh_page(self):
         """Refresh the current page."""
-        if not self.driver:
-            raise RuntimeError("Driver not initialized")
+        self._ensure_driver()
+        assert self.driver is not None
         self.driver.get(self.current_url)
         return True
 
