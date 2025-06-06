@@ -56,9 +56,13 @@ chrome_image = modal.Image.debian_slim(python_version="3.12").run_commands(
     'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list',
     "apt-get update",
     "apt-get install -y google-chrome-stable",
-    # Install Python dependencies
-    "pip install numpy selenium>=4.0.0 miniwob@git+https://github.com/liaopeiyuan/miniwob-tilde.git@master",
-).add_local_dir("miniwob/html", "/opt/miniwob/html")
+    # Clone the repo and install from source to include all package data (like the html files).
+    # This makes the image self-contained and removes dependency on the local filesystem.
+    "git clone https://github.com/liaopeiyuan/miniwob-tilde.git /root/miniwob-tilde",
+    "pip install /root/miniwob-tilde",
+    # Install other Python dependencies
+    "pip install numpy selenium>=4.0.0",
+)
 
 
 @app.cls(image=chrome_image, scaledown_window=300)
@@ -95,10 +99,13 @@ class ModalBrowserSession:
         from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
         from threading import Thread
 
-        html_dir = "/opt/miniwob/html"
+        # Because we install the package from source, we can find the html dir via the library path.
+        import miniwob
+        html_dir = pathlib.Path(miniwob.__file__).parent / "html"
+
         self.httpd = ThreadingHTTPServer(
             ("localhost", 0),
-            functools.partial(SimpleHTTPRequestHandler, directory=html_dir),
+            functools.partial(SimpleHTTPRequestHandler, directory=str(html_dir)),
         )
 
         def serve_forever(server):
@@ -145,6 +152,7 @@ class ModalBrowserSession:
             path = subdomain.replace(".", "/") + "/wrapper.html"
             self.current_url = urllib.parse.urljoin(self.base_url, path)
         else:
+            # The HTML files are now inside a 'miniwob' subdirectory within the main html dir.
             path = f"miniwob/{subdomain}.html"
             self.current_url = urllib.parse.urljoin(self.base_url, path)
 
