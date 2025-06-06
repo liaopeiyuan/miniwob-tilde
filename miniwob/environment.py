@@ -10,6 +10,7 @@ from miniwob.fields import FieldExtractor
 from miniwob.observation import Observation, get_observation_space
 from miniwob.reward import RewardProcessor
 from miniwob.selenium_instance import SeleniumInstance
+from miniwob.modal_instance import ModalInstance
 
 
 class MiniWoBEnvironment(gym.Env):
@@ -25,6 +26,7 @@ class MiniWoBEnvironment(gym.Env):
         self,
         subdomain: Optional[str] = None,
         render_mode: Optional[str] = None,
+        backend: str = "selenium",
         base_url: Optional[str] = None,
         action_space_config: Union[str, ActionSpaceConfig] = "all_supported",
         field_extractor: Optional[FieldExtractor] = None,
@@ -43,6 +45,9 @@ class MiniWoBEnvironment(gym.Env):
             render_mode: Render mode. Supported values are:
                 - None: Headless Chrome (default)
                 - "human": Show the Chrome screen
+            backend: Backend to use. Supported values are:
+                - "selenium": Use SeleniumInstance
+                - "modal": Use ModalInstance
             base_url: Base URL, which is usually one of the following
                 - http://localhost:8000/miniwob/     (served by http-serve)
                 - file:///path/to/miniwob-plusplus/html/miniwob/
@@ -83,6 +88,7 @@ class MiniWoBEnvironment(gym.Env):
             "refresh_freq": refresh_freq,
             "data_mode": data_mode,
         }
+        self.backend = backend
         self._hard_reset_instance()
         if isinstance(action_space_config, str):
             self.action_space_config = ActionSpaceConfig.get_preset(action_space_config)
@@ -97,11 +103,16 @@ class MiniWoBEnvironment(gym.Env):
         )
 
     def _hard_reset_instance(self):
-        """Close the current SeleniumInstance (if exists) and starts a new one."""
+        """Close the current instance (if exists) and starts a new one."""
         if hasattr(self, "instance") and self.instance:
             self.instance.close()
-        logging.info("Starting WebDriver Instance")
-        self.instance = SeleniumInstance(index=0, **self.instance_kwargs)
+        logging.info(f"Starting instance with backend: {self.backend}")
+        if self.backend == "selenium":
+            self.instance = SeleniumInstance(index=0, **self.instance_kwargs)
+        elif self.backend == "modal":
+            self.instance = ModalInstance(index=0, **self.instance_kwargs)
+        else:
+            raise ValueError(f"Unknown backend: {self.backend}")
         self.instance.start()
         self.instance.wait()
 
